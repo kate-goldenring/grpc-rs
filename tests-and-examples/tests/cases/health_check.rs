@@ -88,7 +88,56 @@ fn test_health_check() {
     req.set_service("not-exist".to_owned());
     let err = client.check(&req).unwrap_err();
     match err {
+        k
         Error::RpcFailure(s) => assert_eq!(s.status, RpcStatusCode::NOT_FOUND),
+        e => panic!("unexpected error: {:?}", e),
+    }
+}
+
+
+#[test]
+#[cfg(unix)]
+fn test_health_check_unix() {
+    let env = Arc::new(Environment::new(1));
+    let status: Arc<RwLock<StatusRegistry>> = Arc::default();
+    let service = create_health(HealthService {
+        status: status.clone(),
+    });
+    let mut server = ServerBuilder::new(env.clone())
+        .register_service(service)
+        .bind_unix("/tmp/health_check_unix")
+        .build()
+        .unwrap();
+    server.start();
+    // let path = &server.bind_unix_addrs()[0];
+
+    let ch = ChannelBuilder::new(env).connect_unix("/tmp/health_check_unix");
+    let client = HealthClient::new(ch);
+
+    check_health(
+        &client,
+        &status,
+        "test",
+        HealthCheckResponse_ServingStatus::SERVING,
+    );
+    check_health(
+        &client,
+        &status,
+        "test",
+        HealthCheckResponse_ServingStatus::NOT_SERVING,
+    );
+    check_health(
+        &client,
+        &status,
+        "test",
+        HealthCheckResponse_ServingStatus::UNKNOWN,
+    );
+
+    let mut req = HealthCheckRequest::new();
+    req.set_service("not-exist".to_owned());
+    let err = client.check(&req).unwrap_err();
+    match err {
+        Error::RpcFailure(s) => assert_eq!(s.status, RpcStatusCode::NotFound),
         e => panic!("unexpected error: {:?}", e),
     }
 }
