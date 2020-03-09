@@ -21,6 +21,13 @@ use crate::task::Kicker;
 use crate::CallOption;
 use crate::ResourceQuota;
 
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
+#[cfg(unix)]
+use std::path::Path;
+
 pub use crate::grpc_sys::{
     grpc_compression_algorithm as CompressionAlgorithms,
     grpc_compression_level as CompressionLevel, grpc_connectivity_state as ConnectivityState,
@@ -470,6 +477,30 @@ impl ChannelBuilder {
             unsafe { grpc_sys::grpc_insecure_channel_create(addr_ptr, args.args, ptr::null_mut()) };
 
         Channel::new(self.env.pick_cq(), self.env, channel)
+    }
+
+    /// Build an insecure [`Channel`] that connects to a specific UNIX domain socket.
+    //#[cfg(unix)]
+    pub fn connect_unix(mut self, addr: &str) -> Channel {
+        let socket_path = Path::new(&addr);
+        match UnixStream::connect(&socket_path) {
+            Ok(sock) => {
+                let args = self.prepare_connect_args();
+                let path = CString::new(addr).unwrap();
+                let path_ptr = path.as_ptr();
+                let channel = unsafe {
+                    grpc_sys::grpc_insecure_channel_create_from_fd(
+                        path_ptr,
+                        sock.as_raw_fd(),
+                        args.args,
+                    )
+                };
+                return Channel::new(self.env.pick_cq(), self.env, channel);
+            }
+            Err(e) => {
+                panic!("Can't connect to UNIX domain socket: {:?}", e);
+            }
+        }
     }
 }
 
